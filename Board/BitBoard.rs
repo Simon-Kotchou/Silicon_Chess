@@ -36,13 +36,13 @@ impl BitBoard {
     }
 
     pub fn occupancy(&self) -> u64 {
-        self.white_pieces.iter().chain(self.black_pieces.iter()).map(|&x| x).sum()
+        self.white_pieces.iter().chain(self.black_pieces.iter()).fold(0, |acc, &x| acc | x)
     }
 
     pub fn occupancy_color(&self, color: Color) -> u64 {
         match color {
-            Color::White => self.white_pieces.iter().map(|&x| x).sum(),
-            Color::Black => self.black_pieces.iter().map(|&x| x).sum(),
+            Color::White => self.white_pieces.iter().fold(0, |acc, &x| acc | x),
+            Color::Black => self.black_pieces.iter().fold(0, |acc, &x| acc | x),
         }
     }
 }

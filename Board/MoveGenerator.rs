@@ -19,6 +19,21 @@ impl MoveGenerator {
         self.magic_bitboards.rook_table[magic_index] & !self.bit_board.occupancy_color(color)
 
     pub fn legal_moves(&self, color: Color) -> Vec<((usize, usize), (usize, usize))> {
-        // Implement move generation for each piece type using bitwise operations and magic bitboards
+        let mut moves = Vec::new();
+
+        for square in 0..64 {
+            let position = BitBoard::index_to_position(square);
+
+            if self.bit_board.get_piece_at(position) == Some((Piece::Rook, color)) {
+                let rook_moves = self.rook_moves(position, color);
+                for dst_square in BitBoard::bits_to_positions(rook_moves) {
+                    moves.push((position, dst_square));
+                }
+            }
+
+            // Add similar blocks for other piece types, e.g. bishops, knights, kings, pawns, and queens
+        }
+
+        moves
     }
 }

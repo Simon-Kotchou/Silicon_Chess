@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use rayon::prelude::*;
+use std::sync::RwLock;
 
 #[derive(Debug, Clone)]
 pub struct MCTS {
@@ -8,6 +9,7 @@ pub struct MCTS {
     max_iterations: u64,
     exploration_constant: f64,
     zobrist: Zobrist,
+    valuator: Arc<RwLock<TorchModel>>, // Add valuator to MCTS
 }
 
 #[derive(Debug, Clone)]
@@ -20,11 +22,13 @@ struct Node {
 }
 
 impl MCTS {
-    pub fn new(initial_state: GameState, max_iterations: u64, exploration_constant: f64) -> Self {
+    pub fn new(initial_state: GameState, max_iterations: u64, exploration_constant: f64, zobrist: Zobrist, valuator: TorchModel) -> Self {
         MCTS {
             root: Arc::new(Mutex::new(Node::new(initial_state))),
             max_iterations,
             exploration_constant,
+            zobrist,
+            valuator: Arc::new(RwLock::new(valuator)),
         }
     }
 
@@ -40,6 +44,13 @@ impl MCTS {
 
         let root = self.root.lock().unwrap();
         root.best_child().map(|child| child.lock().unwrap().state.clone())
+    }
+
+    pub fn evaluate_board(&self, board: &ChessBoard) -> f64 {
+        let input = board_to_tensor(board); // Convert the ChessBoard to a Tensor format that the model can understand
+        let valuator = self.valuator.read().unwrap();
+        let output = valuator.infer(&input).unwrap();
+        output[0].double_value(&[]) // Get the evaluation score from the output tensor
     }
 
     fn select(&self) -> usize {
@@ -115,3 +126,8 @@ impl Node {
             f64::MAX
         } else {
             (self.wins as f64 / self.visits as f64) + exploration_constant * (2.0 * (self.parent.unwrap().visits as f64).
+            
+
+fn board_to_tensor(board: &ChessBoard) -> Tensor {
+    // Implement the logic to convert a ChessBoard into a Tensor format that the neural network can understand
+}
