@@ -13,6 +13,7 @@
 **/*.json
 **/*.svg
 **/*.map
+**/*.pdf
 
 # Environment files
 .env
