@@ -47,3 +47,4 @@ impl Clone for GameState {
             hash: self.hash,
         }
     }
+}
