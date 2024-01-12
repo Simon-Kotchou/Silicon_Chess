@@ -1,6 +1,9 @@
-[lib]
-name = "mcts_lib"
-crate-type = ["cdylib"]
+[package]
+name = "Silicon_Chess"
+version = "0.0.0"
+authors = ["simonk <simonkotchou@mines.edu>"]
+license = "MIT"
+edition = "2018"
 
 [dependencies]
 rayon = "1.5.1"
