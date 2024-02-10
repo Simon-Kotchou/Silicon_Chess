@@ -75,8 +75,11 @@ impl SearchTree {
 }
 
 impl TreeNode {
+
     fn new(/* parameters to initialize a node */) -> Self {
-        // Initialize a TreeNode with given parameters
+        // Assuming each TreeNode has a list of children and associated evaluation scores
+        children: Vec<TreeNode>;
+        evaluation: f64; // Evaluation of the current node
     }
 
     fn draw(&self, ctx: Context, g: &mut G2d) {
@@ -84,8 +87,38 @@ impl TreeNode {
         // This could involve drawing a circle or rectangle at the node's position,
         // and possibly adding text to display the node's evaluation score or other data
     }
-}
 
+    // Method to calculate the "sharpness" of the current node
+    fn calculate_sharpness(&self) -> f64 {
+        let scores: Vec<f64> = self.children.iter().map(|child| child.evaluation).collect();
+
+        // Calculate the standard deviation of the scores
+        let mean: f64 = scores.iter().sum::<f64>() / scores.len() as f64;
+        let variance: f64 = scores.iter().map(|score| (*score - mean).powi(2)).sum::<f64>() / scores.len() as f64;
+        let std_deviation: f64 = variance.sqrt();
+
+        std_deviation // Higher values indicate "sharper" positions
+    }
+
+    // Method to evaluate the clarity of the top k moves
+    fn evaluate_move_clarity(&self, k: usize) -> f64 {
+        let mut top_moves = self.children.iter().map(|child| child.evaluation).collect::<Vec<f64>>();
+        // Sort the moves in descending order based on evaluation
+        top_moves.sort_by(|a, b| b.partial_cmp(a).unwrap());
+
+        // Get the top k moves, ensuring we don't exceed the bounds
+        let top_k_moves = top_moves.iter().take(k.min(top_moves.len()));
+
+        // Calculate the difference between the top move and the k-th move
+        if let Some(top_move) = top_k_moves.clone().next() {
+            if let Some(kth_move) = top_k_moves.last() {
+                return top_move - kth_move; // Larger values indicate more clarity in the position
+            }
+        }
+
+        0.0 // Default to 0.0 if there are not enough moves to compare
+    }
+}
 impl Metrics {
     // Initialize default metrics
     fn default() -> Self {
