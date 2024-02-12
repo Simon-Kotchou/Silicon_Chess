@@ -7,38 +7,37 @@ from mcts import MCTS  # Assuming you have an MCTS implementation available
 class MuZeroChessAgent(nn.Module):
     def __init__(self, deit_config, num_moves):
         super(MuZeroChessAgent, self).__init__()
-        # Representation Function
-        self.representation = DeiTEncoder(deit_config)
-        
-        # Dynamics Function - Assuming it's a simple MLP for this example
-        self.dynamics = nn.Sequential(
-            nn.Linear(deit_config.hidden_size + num_moves, deit_config.hidden_size),
-            nn.ReLU(),
-            nn.Linear(deit_config.hidden_size, deit_config.hidden_size),
-            nn.ReLU()
-        )
-        
-        # Prediction Function
+        # Existing components
+        self.encoder = DeiTEncoder(deit_config)  # Representation function
         self.policy_head = PolicyHead(deit_config.hidden_size, num_moves)
         self.value_head = ValueHead(deit_config.hidden_size)
         
-        self.num_moves = num_moves
+        # Dynamics function: Predicts next hidden state and reward
+        self.dynamics = nn.Sequential(
+            nn.Linear(deit_config.hidden_size + num_moves, deit_config.hidden_size),  # Combine hidden state and action
+            nn.ReLU(),
+            nn.Linear(deit_config.hidden_size, deit_config.hidden_size),  # Next hidden state prediction
+            nn.ReLU(),
+            nn.Linear(deit_config.hidden_size, 1)  # Reward prediction
+        )
 
     def forward(self, pixel_values, action=None, hidden_state=None):
-        # If no action and hidden_state are provided, use the representation function
         if hidden_state is None:
-            hidden_state = self.representation(pixel_values)
-        
-        # If an action is provided, use the dynamics function to predict the next hidden state
+            hidden_state = self.encoder(pixel_values)  # Use encoder to get initial hidden state
+
+        reward = None
         if action is not None:
-            action_one_hot = F.one_hot(action, num_classes=self.num_moves).float()
-            hidden_state = self.dynamics(torch.cat([hidden_state, action_one_hot], dim=-1))
-        
-        # Use the prediction function to predict policy and value
+            # Encode action as one-hot vector
+            action_one_hot = F.one_hot(action, num_classes=self.policy_head.num_moves).float()
+            # Predict next hidden state and reward
+            dynamics_output = self.dynamics(torch.cat([hidden_state, action_one_hot], dim=-1))
+            hidden_state, reward = dynamics_output[:, :-1], dynamics_output[:, -1]
+
+        # Predict policy and value from hidden state
         policy_logits = self.policy_head(hidden_state)
         value = self.value_head(hidden_state)
-        
-        return policy_logits, value, hidden_state
+
+        return policy_logits, value, hidden_state, reward
 
     def self_play(self, mcts_simulations, board):
         mcts = MCTS(self, board)
