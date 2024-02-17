@@ -76,7 +76,7 @@ impl SearchTree {
 
 impl TreeNode {
 
-    fn new(/* parameters to initialize a node */) -> Self {
+    fn new(children: Vec<TreeNode>, evaluation: f64) -> Self {
         // Assuming each TreeNode has a list of children and associated evaluation scores
         children: Vec<TreeNode>;
         evaluation: f64; // Evaluation of the current node

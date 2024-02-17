@@ -31,7 +31,7 @@ class ChessVectorDatabase:
         distances, indices = self.index.search(np.array([query_vector]), k)
         return distances, indices
 
-def find_similar_positions(query_position: ChessPosition, k=5):
-    query_vector = np.array([query_position.vector_representation]).astype(np.float32)
-    distances, indices = faiss_index.search(query_vector, k)
-    return [(positions[idx], distances[0][i]) for i, idx in enumerate(indices[0])]
+    def find_similar_positions(self, query_position: ChessPosition, k=5):
+        query_vector = np.array([query_position.vector_representation]).astype(np.float32)
+        distances, indices = self.index.search(query_vector, k)
+        return [(positions[idx], distances[0][i]) for i, idx in enumerate(indices[0])]
