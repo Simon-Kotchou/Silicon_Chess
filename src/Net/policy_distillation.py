@@ -31,4 +31,4 @@ class PolicyDistillationTrainer(Trainer):
             reduction='batchmean'
         ) * (self.temperature ** 2)  # Scale by temperature squared as per Hinton et al.
 
-        return (loss, outputs_student) if return_outputs else loss
+        return (loss, outputs_student) if return_outputs else loss 

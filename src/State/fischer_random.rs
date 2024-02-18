@@ -64,4 +64,5 @@ fn validate_move_chess960(board: &Board, move: &Move) -> bool {
         // For non-castling moves, use the standard rules.
         validate_move_standard(board, move)
     }
-}
+}  
+
