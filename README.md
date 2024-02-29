@@ -25,7 +25,6 @@ Our ambition stretches beyond creating a mere chess-playing AI; we aim to sculpt
 ## Future Directions
 
 The journey doesn't end here; we're on a relentless quest to transcend current AI chess paradigms. We're exploring novel techniques, integrating comprehensive chess resources, and refining our AI to not only compete in prestigious tournaments like the TCEC but also to redefine what's possible in the realm of artificial chess intelligence.
-Join Our Quest
 
 Intrigued by the fusion of chess and cutting-edge AI? We welcome contributions, questions, and collaborations. Whether you're a chess aficionado, an AI enthusiast, or a curious mind, your insights can help shape the future of chess AI. Dive into our project, and let's together unlock new horizons in artificial intelligence and chess.
 
