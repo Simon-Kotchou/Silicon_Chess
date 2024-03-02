@@ -88,3 +88,4 @@ pub fn get_encoder_by_name(name: &str, board_size: (usize, usize)) -> Box<dyn En
         // Extend this match arm to include other encoders as needed.
         _ => panic!("Unknown encoder name: {}", name),
     }
+}

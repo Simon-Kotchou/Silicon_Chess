@@ -21,42 +21,25 @@ impl Piece {
         }
     }
 
-    fn pawn_moves(&self, board: &ChessBoard) -> Vec<(usize, usize)> {
+    fn pawn_moves(&self, board: &ChessBoard, bitboards: &BitBoards) -> Vec<(usize, usize)> {
+        // Assuming BitBoards is a struct holding all bitboards for the game
+        // and that you have a function to translate (x, y) to bitboard index and vice versa
         let mut moves = Vec::new();
         let (x, y) = self.position;
-        let direction = match self.color {
-            Color::White => 1,
-            Color::Black => -1,
-        };
+        let bb_index = xy_to_bitboard_index(x, y);
 
-        // One step forward
-        let new_x = (x as i32 + direction) as usize;
-        if new_x < 8 && board.board[new_x][y].is_none() {
-            moves.push((new_x, y));
-        }
+        // Use bitboard operations to generate moves
+        let forward_moves = bitboards.generate_pawn_moves(bb_index, self.color);
 
-        // Two steps forward
-        if !self.has_moved() && new_x < 8 && board.board[new_x][y].is_none() {
-            let new_x2 = (new_x as i32 + direction) as usize;
-            if new_x2 < 8 && board.board[new_x2][y].is_none() {
-                moves.push((new_x2, y));
-            }
-        }
-
-        // Capture
-        for &new_y in &[y.wrapping_sub(1), y + 1] {
-            if new_x < 8 && new_y < 8 {
-                if let Some(ref other_piece) = board.board[new_x][new_y] {
-                    if other_piece.color != self.color {
-                        moves.push((new_x, new_y));
-                    }
-                }
+        // Translate bitboard moves back to (x, y) coordinates
+        for move_index in forward_moves {
+            if let Some((new_x, new_y)) = bitboard_index_to_xy(move_index) {
+                moves.push((new_x, new_y));
             }
         }
 
         moves
     }
-
     // Implement move generation for other piece types
 }
 

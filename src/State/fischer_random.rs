@@ -23,12 +23,24 @@ fn generate_chess960_position() -> Vec<Piece> {
 
 // This function checks if a position is valid under Chess960 rules.
 fn is_valid_chess960_position(pieces: &[Piece]) -> bool {
-    let king_index = pieces.iter().position(|&piece| piece == Piece::King).unwrap();
-    let rook_indices: Vec<_> = pieces.iter().enumerate()
-        .filter(|&(_, &piece)| piece == Piece::Rook)
-        .map(|(index, _)| index)
+    // Check bishops are on opposite colors
+    let bishop_positions: Vec<usize> = pieces.iter().enumerate()
+        .filter_map(|(i, &piece)| if piece == Piece::Bishop { Some(i) } else { None })
         .collect();
-    rook_indices[0] < king_index && king_index < rook_indices[1]
+    if bishop_positions.len() != 2 || bishop_positions[0] % 2 == bishop_positions[1] % 2 {
+        return false;
+    }
+
+    // Ensure king is between rooks
+    let king_index = pieces.iter().position(|&piece| piece == Piece::King).unwrap();
+    let rook_positions: Vec<usize> = pieces.iter().enumerate()
+        .filter_map(|(i, &piece)| if piece == Piece::Rook { Some(i) } else { None })
+        .collect();
+    if rook_positions.len() != 2 || !(rook_positions[0] < king_index && king_index < rook_positions[1]) {
+        return false;
+    }
+
+    true
 }
 
 // This function validates a move under Chess960 rules.
