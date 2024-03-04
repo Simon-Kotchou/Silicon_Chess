@@ -8,27 +8,32 @@ class PolicyHead(nn.Module):
     # (The PolicyHead and ValueHead classes remain unchanged)
 
 class AnticipationHead(nn.Module):
-    def __init__(self, hidden_dim, num_moves):
+    def __init__(self, hidden_dim, embedding_dim):
         super(AnticipationHead, self).__init__()
-        self.conv = nn.Conv2d(hidden_dim, 2, kernel_size=1)  # Assuming a 1x1 conv for simplicity
-        self.bn = nn.BatchNorm2d(2)
+        self.conv = nn.Conv2d(hidden_dim, embedding_dim, kernel_size=1)
+        self.bn = nn.BatchNorm2d(embedding_dim)
         self.flatten = nn.Flatten()
-        self.fc = nn.Linear(2 * 8 * 8, num_moves)  # Adjust the size based on your input
+        self.projection_head = nn.Sequential(
+            nn.Linear(embedding_dim * 64, embedding_dim),
+            nn.ReLU(),
+            nn.Linear(embedding_dim, embedding_dim),
+        )
 
     def forward(self, x):
         x = F.relu(self.bn(self.conv(x)))
         x = self.flatten(x)
-        x = self.fc(x)
-        return x
+        generative = x
+        discriminative = self.projection_head(x)
+        return generative, discriminative
 
 class ChessSSLRLAgent(nn.Module):
-    def __init__(self, deit_config, num_moves):
+    def __init__(self, deit_config, num_moves, embedding_dim):
         super(ChessSSLRLAgent, self).__init__()
         # Representation function
         self.encoder = DeiTEncoder(deit_config)
         self.policy_head = PolicyHead(deit_config.hidden_size, num_moves)
         self.value_head = ValueHead(deit_config.hidden_size)
-        self.anticipation_head = AnticipationHead(deit_config.hidden_size, num_moves)
+        self.anticipation_head = AnticipationHead(deit_config.hidden_size, embedding_dim)
 
         # Dynamics function: Predicts next hidden state and reward
         self.dynamics = nn.Sequential(
@@ -54,9 +59,9 @@ class ChessSSLRLAgent(nn.Module):
         # Predict policy, value, and anticipation from hidden state
         policy_logits = self.policy_head(hidden_state)
         value = self.value_head(hidden_state)
-        anticipation = self.anticipation_head(hidden_state)
+        anticipation_generative, anticipation_discriminative = self.anticipation_head(hidden_state)
 
-        return policy_logits, value, hidden_state, reward, anticipation
+        return policy_logits, value, hidden_state, reward, anticipation_generative, anticipation_discriminative
 
     def self_play(self, mcts_simulations, board):
         mcts = MCTS(self, board)
@@ -70,13 +75,15 @@ class ChessSSLRLAgent(nn.Module):
         next_board, reward, done = board.step(action)
 
         # Store the data for training
-        self.store_data(board.state, action, reward, next_board.state, done, anticipation=mcts.anticipation)
+        self.store_data(board.state, action, reward, next_board.state, done,
+                        anticipation_generative=mcts.anticipation_generative,
+                        anticipation_discriminative=mcts.anticipation_discriminative)
 
         if done:
             # Train the model at the end of the game
             self.train_model()
 
-    def store_data(self, state, action, reward, next_state, done, anticipation):
+    def store_data(self, state, action, reward, next_state, done, anticipation_generative, anticipation_discriminative):
         # Implement this method to store the game data along with the anticipation output
         pass
 
