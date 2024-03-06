@@ -73,3 +73,66 @@ class Dinov2SSL(nn.Module):
         self._dequeue_and_enqueue(k)
 
         return loss
+    
+
+class ChessSSL(nn.Module):
+    def __init__(self, encoder, projector, masking_ratio=0.15, temperature=0.07, base_temperature=0.07, sinkhorn_iterations=3):
+        super(ChessSSL, self).__init__()
+        self.encoder = encoder
+        self.projector = projector
+        self.masking_ratio = masking_ratio
+        self.temperature = temperature
+        self.base_temperature = base_temperature
+        self.sinkhorn_iterations = sinkhorn_iterations
+
+    def masked_chessboard(self, x):
+        mask = torch.rand_like(x[:, :, 0]) < self.masking_ratio
+        x_masked = x.clone()
+        x_masked[mask] = 0
+        return x_masked, mask
+
+    def forward(self, x1, x2):
+        # Mask the chessboard positions
+        x1_masked, mask1 = self.masked_chessboard(x1)
+        x2_masked, mask2 = self.masked_chessboard(x2)
+
+        # Encode the masked positions
+        z1 = self.encoder(x1_masked)
+        z2 = self.encoder(x2_masked)
+
+        # Project the representations
+        p1 = self.projector(z1)
+        p2 = self.projector(z2)
+
+        # Compute the cosine similarity matrix
+        sim_matrix = torch.einsum('nc,mc->nm', F.normalize(p1), F.normalize(p2)) / self.temperature
+
+        # Compute the Sinkhorn divergence loss
+        loss_sink = self.sinkhorn_divergence(sim_matrix)
+
+        # Compute the masked reconstruction loss
+        loss_rec = self.reconstruction_loss(z1, x1, mask1) + self.reconstruction_loss(z2, x2, mask2)
+
+        # Compute the final loss
+        loss = loss_sink + loss_rec
+
+        return loss
+
+    def sinkhorn_divergence(self, sim_matrix):
+        Q = torch.exp(sim_matrix / self.temperature).T
+        Q /= Q.sum()
+
+        K = torch.exp(sim_matrix / self.base_temperature)
+
+        for _ in range(self.sinkhorn_iterations):
+            Q /= torch.einsum('ab,b->a', K, Q.sum(dim=0))
+            Q /= Q.sum()
+
+        loss = torch.einsum('ab,ab->', Q, torch.log(Q) - sim_matrix / self.temperature)
+
+        return loss
+
+    def reconstruction_loss(self, z, x, mask):
+        x_rec = self.projector(z, inverse=True)
+        loss = F.mse_loss(x_rec[mask], x[mask])
+        return loss
