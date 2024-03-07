@@ -190,3 +190,75 @@ class Dinov2ChessSSL(nn.Module):
     def _update_ema_prototypes(self):
         self.ema_prototypes.weight.data.mul_(self.ema_decay).add_(
             self.prototypes.weight.data, alpha=1 - self.ema_decay)
+        
+
+class IJEPA(nn.Module):
+    def __init__(self, img_size, patch_size, embed_dim, 
+                 num_heads, enc_layers, pred_layers):
+        super().__init__()
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.context_encoder = ViTEncoder(img_size, patch_size, embed_dim, num_heads, enc_layers)
+        self.target_encoder = ViTEncoder(img_size, patch_size, embed_dim, num_heads, enc_layers)
+        self.predictor = ViTPredictor(embed_dim, num_heads, pred_layers)
+        
+    def forward(self, x):
+        # Sample masks
+        context_masks, target_masks = multi_block_masking(self.img_size, self.patch_size)
+        context_masks = context_masks.to(x.device).unsqueeze(0).repeat(x.shape[0], 1).view(x.shape[0], 1, self.img_size, self.img_size)
+        target_masks = target_masks.to(x.device).unsqueeze(1).repeat(x.shape[0], 1, 1).view(x.shape[0], -1, self.img_size, self.img_size)
+
+        # Mask images
+        context_imgs = x * context_masks
+        target_imgs = x.unsqueeze(1) * target_masks
+
+        # Encode
+        context_reps = self.context_encoder(context_imgs)
+        with torch.no_grad():
+            self.target_encoder.eval()
+            target_reps = self.target_encoder(target_imgs.view(-1, 3, self.img_size, self.img_size)).view(x.shape[0], -1, self.img_size**2 // self.patch_size**2, context_reps.shape[-1])
+
+        # Get position embeddings for target blocks
+        target_pos = torch.nonzero(target_masks.flatten(2))[:, 2].view(x.shape[0], -1) 
+
+        # Predict targets
+        pred_reps = self.predictor(context_reps, target_pos)
+
+        # Compute L2 loss
+        loss = torch.mean(torch.stack([torch.mean((pred_reps[i] - target_reps[i])**2) for i in range(x.shape[0])]))
+
+        return loss
+    
+    def update_target_encoder(self, momentum=0.996):
+        with torch.no_grad():
+            for param_q, param_k in zip(self.context_encoder.parameters(), self.target_encoder.parameters()):
+                param_k.data = param_k.data * momentum + param_q.data * (1. - momentum)
+
+def multi_block_masking(img_size, patch_size, num_targets=4, context_scale=(0.85, 1.0), target_scale=(0.15, 0.2), target_aspect_ratio=(0.75, 1.5)):
+    num_patches = (img_size // patch_size) ** 2
+    context_mask = torch.zeros(num_patches)
+    target_masks = []
+
+    # Sample context block
+    context_size = torch.rand(1) * (context_scale[1] - context_scale[0]) + context_scale[0]
+    context_patches = int(num_patches * context_size)
+    context_idx = torch.randperm(num_patches)[:context_patches]
+    context_mask[context_idx] = 1
+
+    # Sample target blocks
+    for _ in range(num_targets):
+        target_size = torch.rand(1) * (target_scale[1] - target_scale[0]) + target_scale[0]
+        aspect_ratio = torch.rand(1) * (target_aspect_ratio[1] - target_aspect_ratio[0]) + target_aspect_ratio[0]
+        target_patches = int(num_patches * target_size)
+        target_h = int(torch.sqrt(target_patches / aspect_ratio))
+        target_w = int(target_patches // target_h)
+        target_idx = torch.randint(0, num_patches, (target_h * target_w,))
+        target_mask = torch.zeros(num_patches)
+        target_mask[target_idx] = 1
+        target_masks.append(target_mask)
+        
+        # Remove overlapping patches from context
+        context_mask[target_idx] = 0
+
+    target_masks = torch.stack(target_masks)
+    return context_mask, target_masks
