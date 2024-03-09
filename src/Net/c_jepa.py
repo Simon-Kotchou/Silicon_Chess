@@ -4,6 +4,7 @@ import chess
 import chess.pgn
 import chess.svg
 from IPython.display import SVG, display
+import random
 
 class ViTEncoder(nn.Module):
     def __init__(self, board_size, embed_dim, num_heads, num_layers):
@@ -169,14 +170,41 @@ def board_to_tensor(board):
             tensor[piece_to_idx[piece.symbol()], i//8, i%8] = 1
     return tensor.flatten()
 
-if __name__ == "__main__":
-    # Load PGN
-    pgn_path = "game.pgn"  # replace with your PGN path
-    boards = parse_pgn(pgn_path)
 
-    # Convert boards to tensors
-    board_tensors = [board_to_tensor(board) for board in boards]
-    board_tensors = torch.stack(board_tensors)
+class PuzzleDataset(torch.utils.data.Dataset):
+    def __init__(self, puzzle_paths):
+        self.puzzles = []
+        for path in puzzle_paths:
+            with open(path) as f:
+                while True:
+                    game = chess.pgn.read_game(f)
+                    if game is None:
+                        break
+                    board = game.board()
+                    moves = list(game.mainline_moves())
+                    self.puzzles.append((board, moves))
+
+    def __len__(self):
+        return len(self.puzzles)
+
+    def __getitem__(self, idx):
+        board, moves = self.puzzles[idx]
+        puzzle_sequence = [board_to_tensor(board)]
+        for move in moves:
+            board.push(move)
+            puzzle_sequence.append(board_to_tensor(board.copy()))
+        return torch.stack(puzzle_sequence)
+
+def generate_vjepa_sequence(puzzle_sequence, seq_length):
+    if len(puzzle_sequence) <= seq_length:
+        return puzzle_sequence
+    start_idx = random.randint(0, len(puzzle_sequence) - seq_length)
+    return puzzle_sequence[start_idx : start_idx + seq_length]
+
+if __name__ == "__main__":
+    # Load puzzle data
+    puzzle_paths = ["puzzles1.pgn", "puzzles2.pgn"]  # replace with your puzzle file paths
+    dataset = PuzzleDataset(puzzle_paths)
 
     # Initialize models
     board_size = 8
@@ -190,14 +218,32 @@ if __name__ == "__main__":
     vjepa = VJEPA(board_size, embed_dim, num_heads, enc_layers, pred_layers, seq_length)
     cjepa = CJEPA(board_size, embed_dim, num_heads, enc_layers, pred_layers, seq_length)
 
-    # Generate masks
-    context_mask, target_masks = square_masking(board_size)
+    # Training loop
+    num_epochs = 10
+    batch_size = 32
+    optimizer = torch.optim.Adam(cjepa.parameters(), lr=1e-4)
 
-    # Compute losses
-    ijepa_loss = ijepa(board_tensors[-1], context_mask, target_masks)
-    vjepa_loss = vjepa(board_tensors[-seq_length:], context_mask.unsqueeze(0).repeat(seq_length, 1, 1), target_masks.unsqueeze(0).repeat(seq_length, 1, 1))
-    cjepa_loss = cjepa(board_tensors[-seq_length:], context_mask, target_masks)
+    for epoch in range(num_epochs):
+        epoch_loss = 0
+        for i in range(0, len(dataset), batch_size):
+            batch_puzzles = [generate_vjepa_sequence(dataset[j], seq_length) for j in range(i, min(i + batch_size, len(dataset)))]
+            batch_tensors = torch.stack([puzzles[-seq_length:] for puzzles in batch_puzzles])
 
-    print("IJEPA Loss:", ijepa_loss.item())
-    print("VJEPA Loss:", vjepa_loss.item())
-    print("CJEPA Loss:", cjepa_loss.item())
+            optimizer.zero_grad()
+
+            # Generate masks (consistent for both IJEPAs and VJEPAs)
+            context_mask, target_masks = square_masking(board_size)
+            context_mask = context_mask.unsqueeze(0).repeat(batch_tensors.shape[0], 1, 1)
+            target_masks = target_masks.unsqueeze(0).repeat(batch_tensors.shape[0], 1, 1, 1)
+
+            # Compute CJEPA loss
+            loss = cjepa(batch_tensors, context_mask, target_masks)
+
+            loss.backward()
+            optimizer.step()
+
+            cjepa.update_target_encoders()
+
+            epoch_loss += loss.item()
+
+        print(f"Epoch [{epoch+1}/{num_epochs}] Loss: {epoch_loss / (len(dataset) // batch_size):.4f}")
