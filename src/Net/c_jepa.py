@@ -196,6 +196,7 @@ class PuzzleDataset(torch.utils.data.Dataset):
         return torch.stack(puzzle_sequence)
 
 def generate_vjepa_sequence(puzzle_sequence, seq_length):
+    #generates seq len jepa sequence for video type tensor processing
     if len(puzzle_sequence) <= seq_length:
         return puzzle_sequence
     start_idx = random.randint(0, len(puzzle_sequence) - seq_length)
