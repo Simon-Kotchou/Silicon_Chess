@@ -13,6 +13,61 @@ async fn download_and_decompress(client: &Client, url: &str) -> Result<Vec<u8>, 
     Ok(decompressed_data)
 }
 
+async fn download_and_decompress_cache(client: &Client, url: &str, cache_dir: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    // Generate a unique filename based on the URL
+    let filename = generate_filename(url);
+    let cache_path = format!("{}/{}", cache_dir, filename);
+
+    // Check if the file exists in the cache
+    if let Ok(cached_data) = tokio::fs::read(&cache_path).await {
+        return Ok(cached_data);
+    }
+
+    // Send a GET request with conditional headers
+    let response = client
+        .get(url)
+        .header(reqwest::header::IF_NONE_MATCH, "*")
+        .send()
+        .await?;
+
+    // Check if the server returned a 304 Not Modified response
+    if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+        return Ok(Vec::new());
+    }
+
+    // Ensure the response is successful
+    if !response.status().is_success() {
+        return Err(format!("Failed to download file: {}", url).into());
+    }
+
+    // Get the total file size from the Content-Length header
+    let total_size = response.content_length().unwrap_or(0);
+
+    // Create a progress bar
+    let progress_bar = indicatif::ProgressBar::new(total_size);
+
+    // Download the file and decompress it
+    let mut compressed_data = Vec::new();
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        compressed_data.extend_from_slice(&chunk);
+        progress_bar.inc(chunk.len() as u64);
+    }
+
+    progress_bar.finish_with_message("Download completed");
+
+    // Decompress the downloaded data
+    let mut decompressed_data = Vec::new();
+    zstd::stream::copy_decode(Cursor::new(&compressed_data), &mut decompressed_data)?;
+
+    // Save the decompressed data to the cache
+    tokio::fs::write(&cache_path, &decompressed_data).await?;
+
+    Ok(decompressed_data)
+}
+
 async fn process_games(decompressed_data: Vec<u8>, pg_client: &PgClient) -> Result<(), Box<dyn std::error::Error>> {
     // Parse the decompressed PGN data and extract relevant information
     // You can use a PGN parsing library like `chess` or `shakmaty` for this
