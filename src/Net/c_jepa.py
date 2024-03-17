@@ -132,12 +132,10 @@ def square_masking(board_size, num_targets=4, context_scale=(0.85, 1.0), target_
 
     # Sample target squares
     for _ in range(num_targets):
-        target_size = torch.randint(min_target_size, int(num_squares * target_scale[1]) + 1, (1,)).item()
+        target_size = int(num_squares * random.uniform(*target_scale))
+        target_size = max(min_target_size, min(target_size, num_squares - occupied_squares.sum().item()))
+        
         available_squares = (1 - occupied_squares).nonzero()
-
-        if len(available_squares) < target_size:
-            break
-
         target_indices = available_squares[torch.randperm(len(available_squares))[:target_size]]
         target_mask = torch.zeros(board_size, board_size)
         target_mask[target_indices[:, 0], target_indices[:, 1]] = 1
