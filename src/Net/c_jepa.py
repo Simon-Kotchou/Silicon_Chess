@@ -114,11 +114,20 @@ class CJEPA(nn.Module):
         super().__init__()
         self.ijepa = IJEPA(board_size, embed_dim, num_heads, enc_layers, pred_layers)
         self.vjepa = VJEPA(board_size, embed_dim, num_heads, enc_layers, pred_layers, seq_length)
+        self.gpredlayer = nn.Linear(embed_dim, board_size**2 * 12)
 
     def forward(self, x, context_mask, target_masks):
         ijepa_loss = self.ijepa(x[:, -1], context_mask, target_masks)
         vjepa_loss = self.vjepa(x, context_mask.unsqueeze(1).repeat(1, x.shape[1], 1, 1), target_masks.unsqueeze(1).repeat(1, x.shape[1], 1, 1))
-        return ijepa_loss + vjepa_loss
+        
+        # Generative loss
+        B = x.shape[0]
+        mask_index = torch.nonzero(target_masks.flatten(1))[:, 1].view(B, -1)
+        pred_gen = self.gpredlayer(self.ijepa.context_encoder(x[:, -1] * context_mask.flatten()).view(B, -1, embed_dim)[torch.arange(B).unsqueeze(1), mask_index])
+        target_gen = x[:, -1].flatten(1)[:, mask_index]
+        gen_loss = torch.mean((pred_gen - target_gen) ** 2)
+
+        return ijepa_loss + vjepa_loss + gen_loss
 
     def update_target_encoders(self, momentum=0.996):
         self.ijepa.update_target_encoder(momentum)
@@ -217,10 +226,11 @@ if __name__ == "__main__":
     vjepa = VJEPA(board_size, embed_dim, num_heads, enc_layers, pred_layers, seq_length)
     cjepa = CJEPA(board_size, embed_dim, num_heads, enc_layers, pred_layers, seq_length)
 
-    # Training loop
+        # Training loop
     num_epochs = 10
     batch_size = 32
     optimizer = torch.optim.Adam(cjepa.parameters(), lr=1e-4)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.1)
 
     for epoch in range(num_epochs):
         epoch_loss = 0
@@ -245,4 +255,5 @@ if __name__ == "__main__":
 
             epoch_loss += loss.item()
 
+        scheduler.step()
         print(f"Epoch [{epoch+1}/{num_epochs}] Loss: {epoch_loss / (len(dataset) // batch_size):.4f}")
