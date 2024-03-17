@@ -158,25 +158,22 @@ def square_masking(board_size, num_targets=4, context_scale=(0.85, 1.0), target_
     return context_mask, target_masks
 
 def parse_pgn(pgn_path):
-    pgn = open(pgn_path)
-    game = chess.pgn.read_game(pgn)
-    board = game.board()
-    boards = []
-    for move in game.mainline_moves():
-        board.push(move)
-        boards.append(board.copy())
+    with open(pgn_path) as pgn:
+        game = chess.pgn.read_game(pgn)
+        board = game.board()
+        boards = [board.copy()]
+        for move in game.mainline_moves():
+            board.push(move)
+            boards.append(board.copy())
     return boards
 
 def board_to_tensor(board):
     piece_to_idx = {"P": 0, "N": 1, "B": 2, "R": 3, "Q": 4, "K": 5,
                     "p": 6, "n": 7, "b": 8, "r": 9, "q": 10, "k": 11}
-    tensor = torch.zeros(12, 8, 8)
-    for i in range(64):
-        piece = board.piece_at(i)
-        if piece is not None:
-            tensor[piece_to_idx[piece.symbol()], i//8, i%8] = 1
+    tensor = torch.zeros(12, 8, 8, dtype=torch.float32)
+    for square, piece in board.piece_map().items():
+        tensor[piece_to_idx[piece.symbol()], square // 8, square % 8] = 1
     return tensor.flatten()
-
 
 class PuzzleDataset(torch.utils.data.Dataset):
     def __init__(self, puzzle_paths):
@@ -203,7 +200,6 @@ class PuzzleDataset(torch.utils.data.Dataset):
         return torch.stack(puzzle_sequence)
 
 def generate_vjepa_sequence(puzzle_sequence, seq_length):
-    #generates seq len jepa sequence for video type tensor processing
     if len(puzzle_sequence) <= seq_length:
         return puzzle_sequence
     start_idx = random.randint(0, len(puzzle_sequence) - seq_length)
