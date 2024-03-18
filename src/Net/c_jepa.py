@@ -157,6 +157,24 @@ def square_masking(board_size, num_targets=4, context_scale=(0.85, 1.0), target_
     target_masks = torch.stack(target_masks) if target_masks else torch.empty(0, board_size, board_size)
     return context_mask, target_masks
 
+def visualize_masked_board(board, mask):
+    dark_square_color = "#8B4513"  # Dark brown color for masked squares
+    
+    # Create a new board with the original position
+    masked_board = chess.Board(board.fen())
+    
+    # Set the fill color for masked squares
+    fill_colors = {}
+    for square in chess.SQUARES:
+        if not mask[square // 8, square % 8]:
+            fill_colors[square] = dark_square_color
+    
+    # Generate the SVG representation of the masked board
+    svg = chess.svg.board(masked_board, fill=fill_colors)
+    
+    # Display the SVG in the notebook
+    display(SVG(svg))
+
 def parse_pgn(pgn_path):
     with open(pgn_path) as pgn:
         game = chess.pgn.read_game(pgn)
