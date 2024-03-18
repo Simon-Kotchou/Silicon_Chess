@@ -155,7 +155,11 @@ def square_masking(board_size, num_targets=4, context_scale=(0.85, 1.0), target_
         context_mask *= (1 - target_mask)
 
     target_masks = torch.stack(target_masks) if target_masks else torch.empty(0, board_size, board_size)
-    return context_mask, target_masks
+    combined_mask = context_mask.clone()
+    for target_mask in target_masks:
+        combined_mask *= (1 - target_mask)
+    
+    return context_mask, target_masks, combined_mask
 
 def visualize_masked_board(board, mask):
     dark_square_color = "#8B4513"  # Dark brown color for masked squares
