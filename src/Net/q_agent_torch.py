@@ -1,6 +1,6 @@
-import numpy as np
-
-from keras.optimizers import SGD
+import torch
+import torch.nn as nn
+import torch.optim as optim
 
 __all__ = [
     'QAgent',
@@ -33,7 +33,6 @@ class QAgent(Agent):
     def select_move(self, game_state):
         board_tensor = self.encoder.encode(game_state)
 
-        # Loop over all legal moves.
         moves = []
         board_tensors = []
         for move in game_state.legal_moves():
@@ -45,13 +44,12 @@ class QAgent(Agent):
             return goboard.Move.pass_turn()
 
         num_moves = len(moves)
-        board_tensors = np.array(board_tensors)
-        move_vectors = np.zeros((num_moves, self.encoder.num_points()))
+        board_tensors = torch.tensor(board_tensors, dtype=torch.float32)
+        move_vectors = torch.zeros((num_moves, self.encoder.num_points()))
         for i, move in enumerate(moves):
             move_vectors[i][move] = 1
 
-        values = self.model.predict([board_tensors, move_vectors])
-        values = values.reshape(len(moves))
+        values = self.model(board_tensors, move_vectors).squeeze()
 
         if self.policy == 'eps-greedy':
             ranked_moves = self.rank_moves_eps_greedy(values)
@@ -72,45 +70,48 @@ class QAgent(Agent):
                     )
                 self.last_move_value = float(values[move_idx])
                 return goboard.Move.play(point)
-        # No legal, non-self-destructive moves less.
+
         return goboard.Move.pass_turn()
 
     def rank_moves_eps_greedy(self, values):
-        if np.random.random() < self.temperature:
-            values = np.random.random(values.shape)
-        # This ranks the moves from worst to best.
-        ranked_moves = np.argsort(values)
-        # Return them in best-to-worst order.
-        return ranked_moves[::-1]
+        if torch.rand(1) < self.temperature:
+            values = torch.rand_like(values)
+        ranked_moves = torch.argsort(values, descending=True)
+        return ranked_moves.tolist()
 
     def rank_moves_weighted(self, values):
-        p = values / np.sum(values)
-        p = np.power(p, 1.0 / self.temperature)
-        p = p / np.sum(p)
-        return np.random.choice(
-            np.arange(0, len(values)),
-            size=len(values),
-            p=p,
-            replace=False)
+        p = values / values.sum()
+        p = torch.pow(p, 1.0 / self.temperature)
+        p = p / p.sum()
+        return torch.multinomial(p, len(values), replacement=False).tolist()
 
     def train(self, experience, lr=0.1, batch_size=128):
-        opt = SGD(lr=lr)
-        self.model.compile(loss='mse', optimizer=opt)
+        criterion = nn.MSELoss()
+        optimizer = optim.SGD(self.model.parameters(), lr=lr)
 
         n = experience.states.shape[0]
         num_moves = self.encoder.num_points()
-        y = np.zeros((n,))
-        actions = np.zeros((n, num_moves))
+        y = torch.zeros((n,))
+        actions = torch.zeros((n, num_moves))
         for i in range(n):
             action = experience.actions[i]
             reward = experience.rewards[i]
             actions[i][action] = 1
             y[i] = 1 if reward > 0 else 0
 
-        self.model.fit(
-            [experience.states, actions], y,
-            batch_size=batch_size,
-            epochs=1)
+        for epoch in range(1):
+            permutation = torch.randperm(n)
+            for i in range(0, n, batch_size):
+                indices = permutation[i:i+batch_size]
+                batch_states = experience.states[indices]
+                batch_actions = actions[indices]
+                batch_y = y[indices]
+
+                self.model.zero_grad()
+                outputs = self.model(batch_states, batch_actions).squeeze()
+                loss = criterion(outputs, batch_y)
+                loss.backward()
+                optimizer.step()
 
     def serialize(self, h5file):
         h5file.create_group('encoder')
@@ -118,14 +119,14 @@ class QAgent(Agent):
         h5file['encoder'].attrs['board_width'] = self.encoder.board_width
         h5file['encoder'].attrs['board_height'] = self.encoder.board_height
         h5file.create_group('model')
-        kerasutil.save_model_to_hdf5_group(self.model, h5file['model'])
+        torch.save(self.model.state_dict(), h5file['model'])
 
     def diagnostics(self):
         return {'value': self.last_move_value}
 
 
 def load_q_agent(h5file):
-    model = kerasutil.load_model_from_hdf5_group(h5file['model'])
+    model = torch.load(h5file['model'])
     encoder_name = h5file['encoder'].attrs['name']
     if not isinstance(encoder_name, str):
         encoder_name = encoder_name.decode('ascii')
