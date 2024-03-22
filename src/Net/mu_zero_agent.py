@@ -1,66 +1,97 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from deit_style_model import DeiTEncoder
-from mcts import MCTS  # Assuming you have an MCTS implementation available
 
-class MuZeroChessAgent(nn.Module):
-    def __init__(self, deit_config, num_moves):
-        super(MuZeroChessAgent, self).__init__()
-        # Existing components
-        self.encoder = DeiTEncoder(deit_config)  # Representation function
-        self.policy_head = PolicyHead(deit_config.hidden_size, num_moves)
-        self.value_head = ValueHead(deit_config.hidden_size)
-        
-        # Dynamics function: Predicts next hidden state and reward
+class MuZeroDynamics(nn.Module):
+    def __init__(self, cjepa_model):
+        super().__init__()
+        self.cjepa = cjepa_model
         self.dynamics = nn.Sequential(
-            nn.Linear(deit_config.hidden_size + num_moves, deit_config.hidden_size),  # Combine hidden state and action
-            nn.ReLU(),
-            nn.Linear(deit_config.hidden_size, deit_config.hidden_size),  # Next hidden state prediction
-            nn.ReLU(),
-            nn.Linear(deit_config.hidden_size, 1)  # Reward prediction
+            nn.Linear(cjepa_model.embed_dim + board_size**2, cjepa_model.embed_dim),
+            nn.LeakyReLU(),
+            nn.Linear(cjepa_model.embed_dim, cjepa_model.embed_dim),
         )
+        self.reward_head = nn.Linear(cjepa_model.embed_dim, 1)
 
-    def forward(self, pixel_values, action=None, hidden_state=None):
-        if hidden_state is None:
-            hidden_state = self.encoder(pixel_values)  # Use encoder to get initial hidden state
+    def forward(self, state, action):
+        # Encode state and action
+        state_embedding = self.cjepa.ijepa.context_encoder(state)
+        action_embedding = torch.zeros(state.shape[0], self.cjepa.board_size**2)
+        action_embedding[torch.arange(state.shape[0]), action] = 1
 
-        reward = None
-        if action is not None:
-            # Encode action as one-hot vector
-            action_one_hot = F.one_hot(action, num_classes=self.policy_head.num_moves).float()
-            # Predict next hidden state and reward
-            dynamics_output = self.dynamics(torch.cat([hidden_state, action_one_hot], dim=-1))
-            hidden_state, reward = dynamics_output[:, :-1], dynamics_output[:, -1]
+        # Concatenate state and action embeddings
+        state_action_embedding = torch.cat([state_embedding, action_embedding], dim=-1)
 
-        # Predict policy and value from hidden state
-        policy_logits = self.policy_head(hidden_state)
-        value = self.value_head(hidden_state)
+        # Predict next state and reward
+        next_state_embedding = self.dynamics(state_action_embedding)
+        reward = self.reward_head(next_state_embedding).squeeze(-1)
 
-        return policy_logits, value, hidden_state, reward
+        return next_state_embedding, reward
 
-    def self_play(self, mcts_simulations, board):
-        mcts = MCTS(self, board)
-        for _ in range(mcts_simulations):
-            mcts.search()
-        
-        # Sample an action from the search policy
-        action = mcts.sample_action()
-        
-        # Apply the action to the board to get the next state
-        next_board, reward, done = board.step(action)
-        
-        # Store the data for training
-        self.store_data(board.state, action, reward, next_board.state, done)
-        
-        if done:
-            # Train the model at the end of the game
-            self.train_model()
+class MuZeroAgent(nn.Module):
+    def __init__(self, cjepa_model):
+        super().__init__()
+        self.dynamics = MuZeroDynamics(cjepa_model)
+        self.prediction = MuZeroPrediction(cjepa_model)
 
-    def store_data(self, state, action, reward, next_state, done):
-        # Implement this method to store the game data
-        pass
+    def forward(self, state, action):
+        next_state_embedding, reward = self.dynamics(state, action)
+        policy_logits, value = self.prediction(next_state_embedding)
+        return next_state_embedding, reward, policy_logits, value
 
-    def train_model(self):
-        # Implement this method to train the model on stored data
-        pass
+class MuZeroPrediction(nn.Module):
+    def __init__(self, cjepa_model):
+        super().__init__()
+        self.policy_head = nn.Linear(cjepa_model.embed_dim, cjepa_model.board_size**4)
+        self.value_head = nn.Linear(cjepa_model.embed_dim, 1)
+
+    def forward(self, state_embedding):
+        policy_logits = self.policy_head(state_embedding)
+        value = self.value_head(state_embedding).squeeze(-1)
+        return policy_logits, value
+
+def muzero_search(agent, state, num_simulations):
+    root = Node(state)
+    for _ in range(num_simulations):
+        node = root
+        search_path = [node]
+
+        while node.expanded():
+            action, node = node.select_child()
+            search_path.append(node)
+
+        parent = search_path[-2]
+        state = parent.state
+        action = node.action
+
+        # Expand the node using the prediction function
+        next_state_embedding, reward, policy_logits, value = agent(state, action)
+        node.expand(policy_logits, reward, value)
+
+        # Backpropagate the value estimates
+        for node in reversed(search_path):
+            node.update_value()
+
+    # Select the action with the highest visit count
+    return max(root.children.items(), key=lambda item: item[1].visit_count)[0]
+
+def muzero_training(agent, replay_buffer, num_epochs, batch_size, lr):
+    optimizer = torch.optim.Adam(agent.parameters(), lr=lr)
+
+    for epoch in range(num_epochs):
+        for batch in replay_buffer.sample_batch(batch_size):
+            obs_batch, action_batch, reward_batch, done_batch, policy_batch, value_batch = batch
+
+            # Compute model predictions
+            _, rewards, policy_logits, values = agent(obs_batch, action_batch)
+
+            # Compute losses
+            policy_loss = torch.nn.functional.cross_entropy(policy_logits, policy_batch)
+            value_loss = torch.nn.functional.mse_loss(values, value_batch)
+            reward_loss = torch.nn.functional.mse_loss(rewards, reward_batch)
+
+            total_loss = policy_loss + value_loss + reward_loss
+
+            # Update model parameters
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
