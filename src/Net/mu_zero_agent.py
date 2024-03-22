@@ -1,5 +1,55 @@
 import torch
 import torch.nn as nn
+from dataclasses import dataclass, field
+from typing import Dict, Tuple
+
+@dataclass
+class Node:
+    state: torch.Tensor
+    action: int = None
+    reward: float = 0.0
+    value: float = 0.0
+    policy: torch.Tensor = None
+    visit_count: int = 0
+    children: Dict[int, 'Node'] = field(default_factory=dict)
+
+    def expand(self, policy, reward, value):
+        self.reward = reward
+        self.value = value
+        self.policy = policy
+        self.visit_count = 1
+        for action in range(policy.shape[-1]):
+            self.children[action] = Node(None)
+
+    def select_child(self, c_puct=1.0):
+        best_value = -float('inf')
+        best_action = -1
+        best_child = None
+
+        for action, child in self.children.items():
+            if child.visit_count == 0:
+                q_value = 0.0
+            else:
+                q_value = child.reward + child.value
+
+            u_value = c_puct * self.policy[action] * (self.visit_count ** 0.5) / (1 + child.visit_count)
+            action_value = q_value + u_value
+
+            if action_value > best_value:
+                best_value = action_value
+                best_action = action
+                best_child = child
+
+        return best_action, best_child
+
+    def update_value(self, value):
+        self.value = (self.visit_count * self.value + value) / (self.visit_count + 1)
+        self.visit_count += 1
+
+    def expanded(self):
+        return len(self.children) > 0
+
+board_size = 8  # Define the board size here
 
 class MuZeroDynamics(nn.Module):
     def __init__(self, cjepa_model):
@@ -15,7 +65,7 @@ class MuZeroDynamics(nn.Module):
     def forward(self, state, action):
         # Encode state and action
         state_embedding = self.cjepa.ijepa.context_encoder(state)
-        action_embedding = torch.zeros(state.shape[0], self.cjepa.board_size**2)
+        action_embedding = torch.zeros(state.shape[0], board_size**2)
         action_embedding[torch.arange(state.shape[0]), action] = 1
 
         # Concatenate state and action embeddings
