@@ -17,3 +17,6 @@
 
 # Environment files
 .env
+
+# data folder
+/data/
