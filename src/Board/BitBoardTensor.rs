@@ -78,3 +78,44 @@ impl ChessTensor {
         }
         mask
     }
+
+    pub fn get_bitboard(&self, piece_type: PieceType, color: Color) -> BitBoard {
+        self.bitboards[Piece::new(piece_type, color).to_index()]
+    }
+
+    pub fn set_bitboard(&mut self, piece_type: PieceType, color: Color, bitboard: BitBoard) {
+        self.bitboards[Piece::new(piece_type, color).to_index()] = bitboard;
+    }
+
+    pub fn iter_bitboards(&self) -> std::slice::Iter<BitBoard> {
+        self.bitboards.iter()
+    }
+
+    pub fn iter_mut_bitboards(&mut self) -> std::slice::IterMut<BitBoard> {
+        self.bitboards.iter_mut()
+    }
+
+    pub fn and(&self, other: &ChessTensor) -> ChessTensor {
+        let mut result = ChessTensor::new();
+        for (i, (b1, b2)) in self.bitboards.iter().zip(other.bitboards.iter()).enumerate() {
+            result.bitboards[i] = *b1 & *b2;
+        }
+        result
+    }
+
+    pub fn or(&self, other: &ChessTensor) -> ChessTensor {
+        let mut result = ChessTensor::new();
+        for (i, (b1, b2)) in self.bitboards.iter().zip(other.bitboards.iter()).enumerate() {
+            result.bitboards[i] = *b1 | *b2;
+        }
+        result
+    }
+
+    pub fn not(&self) -> ChessTensor {
+        let mut result = ChessTensor::new();
+        for (i, b) in self.bitboards.iter().enumerate() {
+            result.bitboards[i] = !*b;
+        }
+        result
+    }
+}
