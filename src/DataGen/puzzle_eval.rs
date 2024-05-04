@@ -38,3 +38,29 @@ fn evaluate_puzzle_from_board(board: &Board, moves: &[&str], engine: &mut dyn En
     }
     true
 }
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 3 {
+        eprintln!("Usage: {} <num_puzzles> <agent>", args[0]);
+        std::process::exit(1);
+    }
+
+    let num_puzzles = args[1].parse::<usize>().expect("Invalid num_puzzles");
+    let agent = &args[2];
+
+    let puzzles_path = Path::new("../data/puzzles.csv");
+    let puzzles_csv = fs::read_to_string(puzzles_path).expect("Failed to read puzzles.csv");
+    let mut puzzles: Vec<Puzzle> = csv::Reader::from_reader(io::Cursor::new(puzzles_csv))
+        .deserialize()
+        .take(num_puzzles + 1)
+        .map(|result| result.expect("Failed to parse puzzle"))
+        .collect();
+
+    let mut engine = ENGINE_BUILDERS[agent]();
+
+    for (puzzle_id, puzzle) in puzzles.iter().enumerate() {
+        let correct = evaluate_puzzle_from_pandas_row(puzzle, &mut engine);
+        println!("{{\"puzzle_id\": {}, \"correct\": {}, \"rating\": {}}}", puzzle_id, correct, puzzle.rating);
+    }
+}
