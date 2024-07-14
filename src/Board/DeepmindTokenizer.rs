@@ -108,3 +108,25 @@ mod tests {
 
         assert_eq!(tokens, expected_tokens);
     }
+
+    #[test]
+    fn test_tokenize_with_en_passant() {
+        let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
+        let expected_tokens = [
+            26, 29, 23, 26, 28, 22, 26, 23, 29, 21, 21, 21, 21, 21, 21, 21, 21, 34, 34, 34, 34, 34,
+            34, 34, 34, 34, 34, 34, 34, 25, 34, 34, 34, 25, 25, 25, 25, 34, 25, 25, 25, 27, 24, 25,
+            30, 14, 19, 34, 34, 34, 34, 34, 34, 34, 34, 19, 34, 34, 34,
+        ];
+
+        let tokens = tokenize(fen);
+
+        assert_eq!(tokens, expected_tokens);
+    }
+
+    #[test]
+    fn test_tokenize_sequence_length() {
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        let tokens = tokenize(fen);
+        assert_eq!(tokens.len(), SEQUENCE_LENGTH);
+    }
+}
