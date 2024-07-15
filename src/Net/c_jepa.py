@@ -79,6 +79,19 @@ def generate_chess_jepa_masks(batch_size, num_squares=64, num_targets=4, context
     
     return context_mask, target_mask
 
+def apply_chess_physics_mask(pieces, move_potentials, mask):
+    # Simulate piece influence and relationships
+    influence_mask = torch.zeros_like(mask)
+    for i in range(mask.size(0)):
+        piece_positions = torch.nonzero(pieces[i] != 0).squeeze()
+        for pos in piece_positions:
+            # Simulate piece influence (simplified)
+            influence_area = move_potentials[i, pos] > 0
+            influence_mask[i] |= influence_area
+    
+    # Combine original mask with influence mask
+    return mask | influence_mask
+
 class ChessPuzzleDataset(Dataset):
     def __init__(self, pgn_files):
         self.puzzles = []
