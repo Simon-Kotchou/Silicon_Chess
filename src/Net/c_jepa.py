@@ -23,6 +23,17 @@ class ChessJEPAEncoder(nn.Module):
         x = self.piece_encoder(pieces, positions, move_potentials)
         x = x * (~mask).unsqueeze(-1).float()
         return self.transformer(x)
+    
+class ChessJEPAPredictor(nn.Module):
+    def __init__(self, d_model, nhead, num_layers):
+        super().__init__()
+        decoder_layer = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward=d_model*4, batch_first=True)
+        self.transformer = nn.TransformerDecoder(decoder_layer, num_layers)
+        self.output = nn.Linear(d_model, 13)  # Predict piece type
+        
+    def forward(self, x, target_mask):
+        x = self.transformer(target_mask.unsqueeze(-1).float(), x)
+        return self.output(x)
 
 class ChessPuzzleDataset(Dataset):
     def __init__(self, pgn_files):
