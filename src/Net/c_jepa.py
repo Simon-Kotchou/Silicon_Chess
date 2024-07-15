@@ -1,60 +1,28 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import chess
-import chess.pgn
-import random
-from torch.utils.data import Dataset, DataLoader
+import torch.nn.functional as F
 
-class ChessTransformerEncoder(nn.Module):
-    def __init__(self, d_model=256, nhead=8, num_layers=6):
+class ChessPieceEncoder(nn.Module):
+    def __init__(self, d_model):
         super().__init__()
-        self.d_model = d_model
-        self.embedding = nn.Embedding(13, d_model)  # 12 piece types + 1 for empty square
-        self.pos_encoding = nn.Parameter(torch.randn(1, 64, d_model))
+        self.piece_embed = nn.Embedding(13, d_model)  # 6 piece types * 2 colors + empty
+        self.position_embed = nn.Embedding(64, d_model)
+        self.move_potential_encoder = nn.Linear(64, d_model)
+        
+    def forward(self, pieces, positions, move_potentials):
+        return self.piece_embed(pieces) + self.position_embed(positions) + self.move_potential_encoder(move_potentials)
+
+class ChessJEPAEncoder(nn.Module):
+    def __init__(self, d_model, nhead, num_layers):
+        super().__init__()
+        self.piece_encoder = ChessPieceEncoder(d_model)
         encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward=d_model*4, batch_first=True)
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers)
-
-    def forward(self, x):
-        x = self.embedding(x) + self.pos_encoding
+        
+    def forward(self, pieces, positions, move_potentials, mask):
+        x = self.piece_encoder(pieces, positions, move_potentials)
+        x = x * (~mask).unsqueeze(-1).float()
         return self.transformer(x)
-    
-class ChessJEPAPredictor(nn.Module):
-    def __init__(self, d_model=256, nhead=8, num_layers=6):
-        super().__init__()
-        self.pos_encoding = nn.Parameter(torch.randn(1, 64, d_model))
-        decoder_layer = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward=d_model*4, batch_first=True)
-        self.transformer = nn.TransformerDecoder(decoder_layer, num_layers)
-
-    def forward(self, x, target_mask):
-        B, N, D = x.shape
-        target_pos = self.pos_encoding.expand(B, -1, -1)
-        target_pos = target_pos[target_mask].view(B, -1, D)
-        return self.transformer(target_pos, x)
-
-class ChessJEPA(nn.Module):
-    def __init__(self, d_model=256, nhead=8, num_encoder_layers=6, num_predictor_layers=6):
-        super().__init__()
-        self.context_encoder = ChessTransformerEncoder(d_model, nhead, num_encoder_layers)
-        self.target_encoder = ChessTransformerEncoder(d_model, nhead, num_encoder_layers)
-        self.predictor = ChessJEPAPredictor(d_model, nhead, num_predictor_layers)
-
-    def forward(self, x, context_mask, target_mask):
-        context_input = x * context_mask
-        context_repr = self.context_encoder(context_input)
-        
-        with torch.no_grad():
-            target_input = x * target_mask
-            target_repr = self.target_encoder(target_input)
-
-        pred_repr = self.predictor(context_repr, target_mask)
-        
-        return pred_repr, target_repr[target_mask]
-
-    def update_target_encoder(self, momentum=0.99):
-        with torch.no_grad():
-            for param_q, param_k in zip(self.context_encoder.parameters(), self.target_encoder.parameters()):
-                param_k.data = param_k.data * momentum + param_q.data * (1. - momentum)
 
 class ChessPuzzleDataset(Dataset):
     def __init__(self, pgn_files):
