@@ -1,60 +1,96 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import chess
-import chess.pgn
-import random
-from torch.utils.data import Dataset, DataLoader
+import torch.nn.functional as F
 
-class ChessTransformerEncoder(nn.Module):
-    def __init__(self, d_model=256, nhead=8, num_layers=6):
+class ChessPieceEncoder(nn.Module):
+    def __init__(self, d_model):
         super().__init__()
-        self.d_model = d_model
-        self.embedding = nn.Embedding(13, d_model)  # 12 piece types + 1 for empty square
-        self.pos_encoding = nn.Parameter(torch.randn(1, 64, d_model))
+        self.piece_embed = nn.Embedding(13, d_model)  # 6 piece types * 2 colors + empty
+        self.position_embed = nn.Embedding(64, d_model)
+        self.move_potential_encoder = nn.Linear(64, d_model)
+        
+    def forward(self, pieces, positions, move_potentials):
+        return self.piece_embed(pieces) + self.position_embed(positions) + self.move_potential_encoder(move_potentials)
+
+class ChessJEPAEncoder(nn.Module):
+    def __init__(self, d_model, nhead, num_layers):
+        super().__init__()
+        self.piece_encoder = ChessPieceEncoder(d_model)
         encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward=d_model*4, batch_first=True)
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers)
-
-    def forward(self, x):
-        x = self.embedding(x) + self.pos_encoding
+        
+    def forward(self, pieces, positions, move_potentials, mask):
+        x = self.piece_encoder(pieces, positions, move_potentials)
+        x = x * (~mask).unsqueeze(-1).float()
         return self.transformer(x)
     
 class ChessJEPAPredictor(nn.Module):
-    def __init__(self, d_model=256, nhead=8, num_layers=6):
+    def __init__(self, d_model, nhead, num_layers):
         super().__init__()
-        self.pos_encoding = nn.Parameter(torch.randn(1, 64, d_model))
         decoder_layer = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward=d_model*4, batch_first=True)
         self.transformer = nn.TransformerDecoder(decoder_layer, num_layers)
-
+        self.output = nn.Linear(d_model, 13)  # Predict piece type
+        
     def forward(self, x, target_mask):
-        B, N, D = x.shape
-        target_pos = self.pos_encoding.expand(B, -1, -1)
-        target_pos = target_pos[target_mask].view(B, -1, D)
-        return self.transformer(target_pos, x)
+        x = self.transformer(target_mask.unsqueeze(-1).float(), x)
+        return self.output(x)
 
 class ChessJEPA(nn.Module):
-    def __init__(self, d_model=256, nhead=8, num_encoder_layers=6, num_predictor_layers=6):
+    def __init__(self, d_model=512, nhead=8, num_encoder_layers=6, num_predictor_layers=3):
         super().__init__()
-        self.context_encoder = ChessTransformerEncoder(d_model, nhead, num_encoder_layers)
-        self.target_encoder = ChessTransformerEncoder(d_model, nhead, num_encoder_layers)
+        self.context_encoder = ChessJEPAEncoder(d_model, nhead, num_encoder_layers)
+        self.target_encoder = ChessJEPAEncoder(d_model, nhead, num_encoder_layers)
         self.predictor = ChessJEPAPredictor(d_model, nhead, num_predictor_layers)
-
-    def forward(self, x, context_mask, target_mask):
-        context_input = x * context_mask
-        context_repr = self.context_encoder(context_input)
+        self.stockfish_predictor = nn.Linear(d_model, 1)  # Predict Stockfish evaluation
         
+    def forward(self, pieces, positions, move_potentials, context_mask, target_mask):
         with torch.no_grad():
-            target_input = x * target_mask
-            target_repr = self.target_encoder(target_input)
-
-        pred_repr = self.predictor(context_repr, target_mask)
+            target_repr = self.target_encoder(pieces, positions, move_potentials, target_mask)
         
-        return pred_repr, target_repr[target_mask]
-
+        context_repr = self.context_encoder(pieces, positions, move_potentials, context_mask)
+        pred_repr = self.predictor(context_repr, target_mask)
+        stockfish_eval = self.stockfish_predictor(context_repr.mean(dim=1))
+        
+        return pred_repr, target_repr, stockfish_eval
+    
     def update_target_encoder(self, momentum=0.99):
         with torch.no_grad():
             for param_q, param_k in zip(self.context_encoder.parameters(), self.target_encoder.parameters()):
                 param_k.data = param_k.data * momentum + param_q.data * (1. - momentum)
+
+def generate_chess_jepa_masks(batch_size, num_squares=64, num_targets=4, context_scale=(0.7, 0.9), target_scale=(0.1, 0.3)):
+    context_mask = torch.ones(batch_size, num_squares, dtype=torch.bool)
+    target_mask = torch.zeros(batch_size, num_squares, dtype=torch.bool)
+    
+    for i in range(batch_size):
+        # Generate context mask
+        context_size = int(num_squares * torch.empty(1).uniform_(*context_scale).item())
+        context_start = torch.randint(0, num_squares - context_size + 1, (1,)).item()
+        context_mask[i, context_start:context_start+context_size] = False
+        
+        # Generate target masks
+        for _ in range(num_targets):
+            target_size = int(num_squares * torch.empty(1).uniform_(*target_scale).item())
+            target_start = torch.randint(0, num_squares - target_size + 1, (1,)).item()
+            target_mask[i, target_start:target_start+target_size] = True
+        
+        # Ensure no overlap between context and target
+        context_mask[i] |= target_mask[i]
+    
+    return context_mask, target_mask
+
+def apply_chess_physics_mask(pieces, move_potentials, mask):
+    # Simulate piece influence and relationships
+    influence_mask = torch.zeros_like(mask)
+    for i in range(mask.size(0)):
+        piece_positions = torch.nonzero(pieces[i] != 0).squeeze()
+        for pos in piece_positions:
+            # Simulate piece influence (simplified)
+            influence_area = move_potentials[i, pos] > 0
+            influence_mask[i] |= influence_area
+    
+    # Combine original mask with influence mask
+    return mask | influence_mask
 
 class ChessPuzzleDataset(Dataset):
     def __init__(self, pgn_files):
