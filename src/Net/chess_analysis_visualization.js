@@ -6,6 +6,8 @@ d3.json('chess_analysis_data.json').then(data => {
     Object.entries(data).forEach(([gameName, gameData]) => {
         createCharts(gameName, gameData, chartContainer);
     });
+}).catch(error => {
+    console.error('Error loading data:', error);
 });
 
 function createCharts(gameName, gameData, container) {
@@ -15,38 +17,26 @@ function createCharts(gameName, gameData, container) {
     
     gameContainer.append('h2').text(gameName);
     
-    // Stockfish Evaluation Chart
-    createLineChart(gameContainer, gameData.stockfish_eval, 'Stockfish Evaluation', 'stockfish-eval');
-    
-    // Control Chart
-    createLineChart(gameContainer, gameData.control, 'Control', 'control');
-    
-    // Influence and Tension Chart
+    createLineChart(gameContainer, gameData.stockfish_eval, 'Stockfish Evaluation', 'stockfish-eval', [-5, 5]);
+    createLineChart(gameContainer, gameData.control, 'Control', 'control', [-1, 1]);
     createMultiLineChart(gameContainer, 
         [gameData.total_influence, gameData.tension], 
         ['Total Influence', 'Tension'], 
         'Influence and Tension', 
         'influence-tension'
     );
-    
-    // Mobility Chart
     createMultiLineChart(gameContainer, 
         [gameData.white_mobility, gameData.black_mobility], 
         ['White Mobility', 'Black Mobility'], 
         'Piece Mobility', 
         'mobility'
     );
-    
-    // Jensen-Shannon Divergence Chart
-    createLineChart(gameContainer, gameData.js_divergence, 'Jensen-Shannon Divergence', 'js-divergence');
-    
-    // Board State Visualizations
-    createBoardVisualizations(gameContainer, gameData, gameName);
+    createLineChart(gameContainer, gameData.js_divergence, 'Jensen-Shannon Divergence', 'js-divergence', [0, 1]);
 }
 
-function createLineChart(container, data, title, id) {
+function createLineChart(container, data, title, id, yDomain) {
     const margin = {top: 20, right: 20, bottom: 30, left: 50};
-    const width = 500 - margin.left - margin.right;
+    const width = 600 - margin.left - margin.right;
     const height = 300 - margin.top - margin.bottom;
     
     const svg = container.append('svg')
@@ -59,11 +49,11 @@ function createLineChart(container, data, title, id) {
     const y = d3.scaleLinear().range([height, 0]);
     
     const line = d3.line()
-        .x((d, i) => x(i))
-        .y(d => y(d));
+        .x(d => x(d.move))
+        .y(d => y(d.value));
     
-    x.domain([0, data.length - 1]);
-    y.domain(d3.extent(data));
+    x.domain(d3.extent(data, d => d.move));
+    y.domain(yDomain || d3.extent(data, d => d.value));
     
     svg.append('path')
         .datum(data)
@@ -74,14 +64,14 @@ function createLineChart(container, data, title, id) {
     
     svg.append('g')
         .attr('transform', `translate(0,${height})`)
-        .call(d3.axisBottom(x));
+        .call(d3.axisBottom(x).ticks(10));
     
     svg.append('g')
         .call(d3.axisLeft(y));
     
     svg.append('text')
         .attr('x', width / 2)
-        .attr('y', 0)
+        .attr('y', 0 - margin.top / 2)
         .attr('text-anchor', 'middle')
         .style('font-size', '16px')
         .text(title);
@@ -89,7 +79,7 @@ function createLineChart(container, data, title, id) {
 
 function createMultiLineChart(container, dataArrays, labels, title, id) {
     const margin = {top: 20, right: 20, bottom: 30, left: 50};
-    const width = 500 - margin.left - margin.right;
+    const width = 600 - margin.left - margin.right;
     const height = 300 - margin.top - margin.bottom;
     
     const svg = container.append('svg')
@@ -104,13 +94,13 @@ function createMultiLineChart(container, dataArrays, labels, title, id) {
     const color = d3.scaleOrdinal(d3.schemeCategory10);
     
     const line = d3.line()
-        .x((d, i) => x(i))
-        .y(d => y(d));
+        .x(d => x(d.move))
+        .y(d => y(d.value));
     
-    x.domain([0, d3.max(dataArrays, arr => arr.length) - 1]);
+    x.domain(d3.extent(dataArrays[0], d => d.move));
     y.domain([
-        d3.min(dataArrays, arr => d3.min(arr)),
-        d3.max(dataArrays, arr => d3.max(arr))
+        d3.min(dataArrays, arr => d3.min(arr, d => d.value)),
+        d3.max(dataArrays, arr => d3.max(arr, d => d.value))
     ]);
     
     dataArrays.forEach((data, index) => {
@@ -124,14 +114,14 @@ function createMultiLineChart(container, dataArrays, labels, title, id) {
     
     svg.append('g')
         .attr('transform', `translate(0,${height})`)
-        .call(d3.axisBottom(x));
+        .call(d3.axisBottom(x).ticks(10));
     
     svg.append('g')
         .call(d3.axisLeft(y));
     
     svg.append('text')
         .attr('x', width / 2)
-        .attr('y', 0)
+        .attr('y', 0 - margin.top / 2)
         .attr('text-anchor', 'middle')
         .style('font-size', '16px')
         .text(title);
@@ -155,67 +145,3 @@ function createMultiLineChart(container, dataArrays, labels, title, id) {
         .style('text-anchor', 'end')
         .text(d => d);
 }
-
-function createBoardVisualizations(container, gameData, gameName) {
-    const numMoves = gameData.white_influence.length;
-    const keyPositions = [0, Math.floor(numMoves / 3), Math.floor(2 * numMoves / 3), numMoves - 1];
-    
-    keyPositions.forEach((position, index) => {
-        const boardContainer = container.append('div')
-            .attr('class', 'board-container')
-            .attr('id', `${gameName}-board-${index}`);
-        
-        boardContainer.append('h3').text(`${gameName} - Position ${position + 1}`);
-        
-        createInfluenceMap(boardContainer, gameData.white_influence[position], gameData.black_influence[position]);
-        createJEPAMask(boardContainer, gameData.jepa_mask[position]);
-    });
-}
-
-function createInfluenceMap(container, whiteInfluence, blackInfluence) {
-    const size = 400;
-    const squareSize = size / 8;
-    
-    const svg = container.append('svg')
-        .attr('width', size)
-        .attr('height', size);
-    
-    const colorScale = d3.scaleLinear()
-        .domain([-1, 0, 1])
-        .range(['blue', 'white', 'red']);
-    
-    for (let i = 0; i < 8; i++) {
-        for (let j = 0; j < 8; j++) {
-            const influence = whiteInfluence[i][j] - blackInfluence[i][j];
-            svg.append('rect')
-                .attr('x', j * squareSize)
-                .attr('y', i * squareSize)
-                .attr('width', squareSize)
-                .attr('height', squareSize)
-                .attr('fill', colorScale(influence));
-        }
-    }
-}
-
-function createJEPAMask(container, jepaMask) {
-    const size = 400;
-    const squareSize = size / 8;
-    
-    const svg = container.append('svg')
-        .attr('width', size)
-        .attr('height', size);
-    
-    for (let i = 0; i < 8; i++) {
-        for (let j = 0; j < 8; j++) {
-            svg.append('rect')
-                .attr('x', j * squareSize)
-                .attr('y', i * squareSize)
-                .attr('width', squareSize)
-                .attr('height', squareSize)
-                .attr('fill', jepaMask[i][j] ? 'rgba(0, 0, 0, 0.5)' : 'rgba(255, 255, 255, 0.5)');
-        }
-    }
-}
-
-// Call the main function to create all visualizations
-createVisualizations();
